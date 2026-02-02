@@ -6,16 +6,28 @@ import os
 import re
 import sys
 
+import emoji
+import questionary
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
 
 day_to_emoji = {
-    'monday': 'red_circle',
-    'tuesday': 'large_orange_circle',
-    'wednesday': 'large_yellow_circle',
-    'thursday': 'large_green_circle',
-    'friday': 'large_blue_circle',
+    "monday": "red_circle",
+    "tuesday": "large_orange_circle",
+    "wednesday": "large_yellow_circle",
+    "thursday": "large_green_circle",
+    "friday": "large_blue_circle",
 }
+
+
+def log(msg: str):
+    print(msg, file=sys.stderr)
+
+
+def emojize(name: str) -> str:
+    """Convert an emoji name to its Unicode character."""
+    name = name.removeprefix("large_")  # Slack-quick: some emoji have prefix "large_" for some reason...
+    return emoji.emojize(f":{name}:", language="alias")
 
 
 def parse_slack_url(url: str) -> tuple[str, str]:
@@ -38,41 +50,25 @@ def submit_reactions(token: str, channel: str, timestamp: str, reactions: list[s
     client = WebClient(token=token)
 
     for reaction in reactions:
-        # Remove colons if user included them (e.g., :thumbsup: -> thumbsup)
+        # Remove colons if user included them (e.g., :thumbsup: -> thumbsup).
         reaction = reaction.strip(":")
+        log(f"Adding reaction :{reaction}: ...")
         try:
             client.reactions_add(channel=channel, timestamp=timestamp, name=reaction)
-            print(f"Added :{reaction}:")
         except SlackApiError as e:
             if e.response["error"] == "already_reacted":
-                print(f"Already reacted with :{reaction}:")
+                log(f"Already reacted with :{reaction}:")
             else:
-                print(f"Failed to add :{reaction}: - {e.response['error']}", file=sys.stderr)
+                log(f"Failed to add reaction :{reaction}: - {e.response['error']}")
 
 
 def select_days() -> list[str]:
     """Prompt user to select days and return corresponding emoji names."""
-    days = list(day_to_emoji.keys())
-    print("Select days (comma-separated numbers, or 'all'):")
-    for i, day in enumerate(days, 1):
-        print(f"  {i}. {day} (:{day_to_emoji[day]}:)")
-
-    selection = input("> ").strip().lower()
-
-    if selection == "all":
-        return list(day_to_emoji.values())
-
-    selected_emojis = []
-    for part in selection.split(","):
-        part = part.strip()
-        if part.isdigit():
-            idx = int(part) - 1
-            if 0 <= idx < len(days):
-                selected_emojis.append(day_to_emoji[days[idx]])
-        elif part in day_to_emoji:
-            selected_emojis.append(day_to_emoji[part])
-
-    return selected_emojis
+    choices = [
+        questionary.Choice(f"{emojize(emoji_name)}  {day.capitalize()}", value=emoji_name)
+        for day, emoji_name in day_to_emoji.items()
+    ]
+    return questionary.checkbox("Select days:", choices=choices).ask()
 
 
 def main():
@@ -82,24 +78,23 @@ def main():
 
     token = os.environ.get("SLACK_USER_TOKEN")
     if not token:
-        print("Error: SLACK_USER_TOKEN environment variable not set", file=sys.stderr)
-        print("\nTo get a user token:", file=sys.stderr)
-        print("1. Create a Slack app at https://api.slack.com/apps", file=sys.stderr)
-        print("2. Add 'reactions:write' to User Token Scopes", file=sys.stderr)
-        print("3. Install the app to your workspace", file=sys.stderr)
-        print("4. Copy the User OAuth Token (starts with xoxp-)", file=sys.stderr)
+        log("Error: SLACK_USER_TOKEN environment variable not set")
+        log("\nTo get a user token:")
+        log("1. Create a Slack app at https://api.slack.com/apps")
+        log("2. Add 'reactions:write' to User Token Scopes")
+        log("3. Install the app to your workspace")
+        log("4. Copy the User OAuth Token (starts with xoxp-)")
         sys.exit(1)
     try:
         channel, timestamp = parse_slack_url(args.link)
     except ValueError as e:
-        print(f"Error: {e}", file=sys.stderr)
+        log(f"Error: {e}")
         sys.exit(1)
 
     reactions = select_days()
     if not reactions:
-        print("No days selected")
-        sys.exit(0)
-
+        log("No days selected")
+        return
     submit_reactions(token, channel, timestamp, reactions)
 
 
