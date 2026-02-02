@@ -11,13 +11,13 @@ import questionary
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
 
-day_to_emoji = {
-    "monday": "red_circle",
-    "tuesday": "large_orange_circle",
-    "wednesday": "large_yellow_circle",
-    "thursday": "large_green_circle",
-    "friday": "large_blue_circle",
-}
+# day_to_emoji = {
+#     "monday": "red_circle",
+#     "tuesday": "large_orange_circle",
+#     "wednesday": "large_yellow_circle",
+#     "thursday": "large_green_circle",
+#     "friday": "large_blue_circle",
+# }
 
 
 def log(msg: str):
@@ -45,6 +45,45 @@ def parse_slack_url(url: str) -> tuple[str, str]:
     return channel_id, timestamp
 
 
+def fetch_message(client: WebClient, channel: str, timestamp: str) -> str:
+    """Fetch a message's text from Slack."""
+    response = client.conversations_history(channel=channel, latest=timestamp, oldest=timestamp, inclusive=True, limit=1)
+    messages = response.get("messages", [])
+    if not messages:
+        raise ValueError(f"Message not found: {channel}/{timestamp}")
+    return messages[0].get("text", "")
+
+
+def parse_line_day_emoji(line: str) -> tuple[str, str] | None:
+    """Parse a day and emoji from a single line.
+
+    Returns (day_id, emoji_name) if found, None otherwise.
+    """
+    line_lower = line.lower()
+    day_id = None
+    for weekday in ['monday', 'tuesday', 'wednesday', 'thursday', 'friday']:
+        if weekday in line_lower:
+            day_id = weekday
+            break
+    if not day_id:
+        return None
+    emoji_match = re.search(r":([a-z_]+):", line)
+    if not emoji_match:
+        return None
+    return day_id, emoji_match.group(1)
+
+
+def parse_emoji_from_message(text: str) -> dict[str, str]:
+    """Parse day-to-emoji mapping from message text."""
+    result = {}
+    for line in text.splitlines():
+        pair = parse_line_day_emoji(line)
+        if pair:
+            day_id, emoji_name = pair
+            result[day_id] = emoji_name
+    return result
+
+
 def submit_reactions(token: str, channel: str, timestamp: str, reactions: list[str]) -> None:
     """Add reactions to a Slack message."""
     client = WebClient(token=token)
@@ -62,11 +101,11 @@ def submit_reactions(token: str, channel: str, timestamp: str, reactions: list[s
                 log(f"Failed to add reaction :{reaction}: - {e.response['error']}")
 
 
-def select_days() -> list[str]:
+def select_days(day_emoji_map: dict[str, str]) -> list[str]:
     """Prompt user to select days and return corresponding emoji names."""
     choices = [
         questionary.Choice(f"{emojize(emoji_name)}  {day.capitalize()}", value=emoji_name)
-        for day, emoji_name in day_to_emoji.items()
+        for day, emoji_name in day_emoji_map.items()
     ]
     return questionary.checkbox("Select days:", choices=choices).ask()
 
@@ -81,7 +120,7 @@ def main():
         log("Error: SLACK_USER_TOKEN environment variable not set")
         log("\nTo get a user token:")
         log("1. Create a Slack app at https://api.slack.com/apps")
-        log("2. Add 'reactions:write' to User Token Scopes")
+        log("2. Add 'reactions:write' and 'channels:history' to User Token Scopes")
         log("3. Install the app to your workspace")
         log("4. Copy the User OAuth Token (starts with xoxp-)")
         sys.exit(1)
@@ -91,7 +130,20 @@ def main():
         log(f"Error: {e}")
         sys.exit(1)
 
-    reactions = select_days()
+    client = WebClient(token=token)
+    try:
+        message_text = fetch_message(client, channel, timestamp)
+    except (SlackApiError, ValueError) as e:
+        log(f"Error fetching message: {e}")
+        sys.exit(1)
+
+    day_emoji_map = parse_emoji_from_message(message_text)
+    if not day_emoji_map:
+        log("Could not parse any day/emoji pairs from message")
+        log(f"Message text: {message_text}")
+        sys.exit(1)
+
+    reactions = select_days(day_emoji_map)
     if not reactions:
         log("No days selected")
         return
