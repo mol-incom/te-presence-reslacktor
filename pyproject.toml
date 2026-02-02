@@ -1,0 +1,10 @@
+[project]
+name = "slacksponder"
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = [
+    "slack_sdk>=3.0.0",
+]
+
+[project.scripts]
+slacksponder = "slacksponder:main"
