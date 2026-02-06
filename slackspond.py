@@ -24,7 +24,7 @@ def log(msg: str):
     print(msg, file=sys.stderr)
 
 
-def emojize(name: str) -> str:
+def emoji_of_name(name: str) -> str:
     """Convert an emoji name to its Unicode character."""
     name = name.removeprefix("large_")  # Slack-quick: some emoji have prefix "large_" for some reason...
     return emoji.emojize(f":{name}:", language="alias")
@@ -84,28 +84,34 @@ def parse_emoji_from_message(text: str) -> dict[str, str]:
     return result
 
 
-def submit_reactions(token: str, channel: str, timestamp: str, reactions: list[str]) -> None:
+def submit_reactions(token: str, channel: str, timestamp: str, reactions: dict[str, bool]) -> None:
     """Add reactions to a Slack message."""
     client = WebClient(token=token)
 
-    for reaction in reactions:
+    for reaction, enable in reactions.items():
         # Remove colons if user included them (e.g., :thumbsup: -> thumbsup).
         reaction = reaction.strip(":")
-        log(f"Adding reaction :{reaction}: ...")
         try:
-            client.reactions_add(channel=channel, timestamp=timestamp, name=reaction)
+            if enable:
+                log(f"Enabling reaction :{reaction}:")
+                client.reactions_add(channel=channel, timestamp=timestamp, name=reaction)
+            else:
+                log(f"Disabling reaction :{reaction}:")
+                client.reactions_remove(channel=channel, timestamp=timestamp, name=reaction)
         except SlackApiError as e:
             if e.response["error"] == "already_reacted":
-                log(f"Already reacted with :{reaction}:")
+                log(f"Reaction :{reaction}: already enabled")
+            elif e.response["error"] == "no_reaction":
+                log(f"Reaction :{reaction}: already disabled")
             else:
-                log(f"Failed to add reaction :{reaction}: - {e.response['error']}")
+                log(f"Failed to add/remove reaction :{reaction}: - {e.response["error"]}")
 
 
 def select_days(day_emoji_map: dict[str, str]) -> list[str]:
-    """Prompt user to select days and return corresponding emoji names."""
+    """Prompt user to select days and return emoji names with checked state."""
     choices = [
-        questionary.Choice(f"{emojize(emoji_name)}  {day.capitalize()}", value=emoji_name)
-        for day, emoji_name in day_emoji_map.items()
+        questionary.Choice(f"{emoji_of_name(emoji)}  {day.capitalize()}", value=day)
+        for day, emoji in day_emoji_map.items()
     ]
     return questionary.checkbox("Select days:", choices=choices).ask()
 
@@ -143,10 +149,8 @@ def main():
         log(f"Message text: {message_text}")
         sys.exit(1)
 
-    reactions = select_days(day_emoji_map)
-    if not reactions:
-        log("No days selected")
-        return
+    days = select_days(day_emoji_map)
+    reactions = { emoji : day in days for day, emoji in day_emoji_map.items() }
     submit_reactions(token, channel, timestamp, reactions)
 
 
