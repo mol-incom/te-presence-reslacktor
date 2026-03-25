@@ -154,7 +154,7 @@ def select_days(day_emoji_map: dict[str, str]) -> list[str]:
         questionary.Choice(f"{emoji_of_name(emoji)}  {day.capitalize()}", value=day)
         for day, emoji in day_emoji_map.items()
     ]
-    return questionary.checkbox("Select days:", choices=choices).ask()
+    return questionary.checkbox("Select days:", choices=choices).unsafe_ask()
 
 
 def resolve_message(client: WebClient, args) -> tuple[str, str, dict[str, str]]:
@@ -232,4 +232,8 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        log("\nAborted.")
+        sys.exit(130)
