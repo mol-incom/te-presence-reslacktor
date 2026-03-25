@@ -125,14 +125,6 @@ def fetch_user_reactions(client: WebClient, msg: MessageRef) -> set[str]:
     return {r["name"] for r in reactions if user_id in r.get("users", [])}
 
 
-def show_status(client: WebClient, msg: MessageRef, day_emoji_map: dict[str, str]):
-    """Print which days the current user has registered for via reactions."""
-    user_reactions = fetch_user_reactions(client, msg)
-    for day, emoji_name in day_emoji_map.items():
-        marker = "✓" if emoji_name in user_reactions else " "
-        print(f"  [{marker}] {emoji_of_name(emoji_name)}  {day.capitalize()}")
-
-
 def submit_reactions(client: WebClient, msg: MessageRef, reactions: dict[str, bool]) -> None:
     """Add reactions to a Slack message."""
     for reaction, enable in reactions.items():
@@ -203,20 +195,11 @@ def run_report(client: WebClient, args):
     submit_reactions(client, msg, reactions)
 
 
-def run_status(client: WebClient, args):
-    msg, day_emoji_map = resolve_message(client, args)
-    show_status(client, msg, day_emoji_map)
-
-
 def main():
     parser = argparse.ArgumentParser(description="Slack reaction tool")
     source = parser.add_mutually_exclusive_group()
     source.add_argument("--link", help="Slack message link")
     source.add_argument("--channel", help="Channel ID for auto-search (or set SLACK_CHANNEL)")
-    subparsers = parser.add_subparsers(dest="command")
-    subparsers.add_parser("report", help="Select and submit reactions (default)")
-    subparsers.add_parser("status", help="Show days already registered")
-
     args = parser.parse_args()
 
     token = os.environ.get("SLACK_USER_TOKEN")
@@ -230,15 +213,7 @@ def main():
         sys.exit(1)
 
     client = WebClient(token=token)
-
-    match args.command:
-        case "report" | None:
-            run_report(client, args)
-        case "status":
-            run_status(client, args)
-        case _:
-            parser.print_help()
-            sys.exit(1)
+    run_report(client, args)
 
 
 if __name__ == "__main__":
