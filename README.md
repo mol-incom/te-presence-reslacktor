@@ -25,13 +25,14 @@ A CLI tool to react to office presence posts in Slack. Parses a message containi
 
 ## Usage
 
-### Update reactions
+### Report presence (default)
 
 Select which days to react to interactively:
 
 ```
-uv run slackspond.py --link "https://yourworkspace.slack.com/archives/C1234567890/p1234567890123456" update
-uv run slackspond.py --channel C1234567890 update
+uv run slackspond.py --channel C1234567890
+uv run slackspond.py --channel C1234567890 report
+uv run slackspond.py --link "https://yourworkspace.slack.com/archives/C1234567890/p1234567890123456" report
 ```
 
 Without `--link` or `--channel`, falls back to the `SLACK_CHANNEL` environment variable and searches for the latest message since last Friday with one emoji per weekday.
@@ -45,7 +46,7 @@ uv run slackspond.py --channel C1234567890 status
 uv run slackspond.py status
 ```
 
-### Selection Controls (update)
+### Selection Controls (report)
 
 - **↑/↓** - move between options
 - **Space** - toggle selection

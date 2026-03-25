@@ -186,7 +186,7 @@ def resolve_message(client: WebClient, args) -> tuple[str, str, dict[str, str]]:
     return channel, timestamp, day_emoji_map
 
 
-def run_update(client: WebClient, args):
+def run_report(client: WebClient, args):
     channel, timestamp, day_emoji_map = resolve_message(client, args)
     days = select_days(day_emoji_map)
     reactions = { emoji : day in days for day, emoji in day_emoji_map.items() }
@@ -204,7 +204,7 @@ def main():
     source.add_argument("--link", help="Slack message link")
     source.add_argument("--channel", help="Channel ID for auto-search (or set SLACK_CHANNEL)")
     subparsers = parser.add_subparsers(dest="command")
-    subparsers.add_parser("update", help="Select and submit reactions")
+    subparsers.add_parser("report", help="Select and submit reactions (default)")
     subparsers.add_parser("status", help="Show days already registered")
 
     args = parser.parse_args()
@@ -222,8 +222,8 @@ def main():
     client = WebClient(token=token)
 
     match args.command:
-        case "update":
-            run_update(client, args)
+        case "report" | None:
+            run_report(client, args)
         case "status":
             run_status(client, args)
         case _:
