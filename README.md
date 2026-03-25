@@ -12,6 +12,7 @@ A CLI tool to react to office presence posts in Slack. Parses a message containi
 2. Create a Slack app at https://api.slack.com/apps
 
 3. Add these scopes under **User Token Scopes**:
+   - `reactions:read`
    - `reactions:write`
    - `channels:history` (or `groups:history` for private channels)
 
@@ -24,17 +25,27 @@ A CLI tool to react to office presence posts in Slack. Parses a message containi
 
 ## Usage
 
+### Update reactions
+
+Select which days to react to interactively:
+
 ```
-uv run slackspond.py "https://yourworkspace.slack.com/archives/C1234567890/p1234567890123456"
+uv run slackspond.py --link "https://yourworkspace.slack.com/archives/C1234567890/p1234567890123456" update
+uv run slackspond.py --channel C1234567890 update
 ```
 
-The tool will:
-1. Fetch the message
-2. Parse lines containing a weekday and an emoji (e.g., `:red_circle: Monday`)
-3. Present an interactive selection UI
-4. Submit the selected reactions
+Without `--link` or `--channel`, falls back to the `SLACK_CHANNEL` environment variable and searches for the latest message since last Friday with one emoji per weekday.
 
-### Selection Controls
+### Check status
+
+Show which days you've already registered for:
+
+```
+uv run slackspond.py --channel C1234567890 status
+uv run slackspond.py status
+```
+
+### Selection Controls (update)
 
 - **↑/↓** - move between options
 - **Space** - toggle selection

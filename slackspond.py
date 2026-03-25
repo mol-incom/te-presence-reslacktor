@@ -110,10 +110,25 @@ def find_message_in_history(client: WebClient, channel: str) -> tuple[dict[str, 
             raise ValueError("No message with exactly one day/emoji pair for each weekday found since last Friday")
 
 
-def submit_reactions(token: str, channel: str, timestamp: str, reactions: dict[str, bool]) -> None:
-    """Add reactions to a Slack message."""
-    client = WebClient(token=token)
+def fetch_user_reactions(client: WebClient, channel: str, timestamp: str) -> set[str]:
+    """Fetch the set of emoji names the current user has reacted with on a message."""
+    user_id = client.auth_test()["user_id"]
+    response = client.reactions_get(channel=channel, timestamp=timestamp)
+    reactions = response.get("message", {}).get("reactions", [])
+    return {r["name"] for r in reactions if user_id in r.get("users", [])}
 
+
+def show_status(client: WebClient, channel: str, timestamp: str, day_emoji_map: dict[str, str]):
+    """Print which days the current user has registered for via reactions."""
+    user_reactions = fetch_user_reactions(client, channel, timestamp)
+    for day, emoji_name in day_emoji_map.items():
+        registered = emoji_name in user_reactions
+        marker = "✓" if registered else " "
+        print(f"  [{marker}] {emoji_of_name(emoji_name)}  {day.capitalize()}")
+
+
+def submit_reactions(client: WebClient, channel: str, timestamp: str, reactions: dict[str, bool]) -> None:
+    """Add reactions to a Slack message."""
     for reaction, enable in reactions.items():
         # Remove colons if user included them (e.g., :thumbsup: -> thumbsup).
         reaction = reaction.strip(":")
@@ -142,24 +157,8 @@ def select_days(day_emoji_map: dict[str, str]) -> list[str]:
     return questionary.checkbox("Select days:", choices=choices).ask()
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Add reactions to a Slack message")
-    parser.add_argument("link", nargs="?", help="Slack message link (if omitted, searches channel history)")
-    parser.add_argument("--channel", help="Channel ID for auto-search when no link is provided (or set SLACK_CHANNEL)")
-    args = parser.parse_args()
-
-    token = os.environ.get("SLACK_USER_TOKEN")
-    if not token:
-        log("Error: SLACK_USER_TOKEN environment variable not set")
-        log("\nTo get a user token:")
-        log("1. Create a Slack app at https://api.slack.com/apps")
-        log("2. Add 'reactions:write' and 'channels:history' to User Token Scopes")
-        log("3. Install the app to your workspace")
-        log("4. Copy the User OAuth Token (starts with xoxp-)")
-        sys.exit(1)
-
-    client = WebClient(token=token)
-
+def resolve_message(client: WebClient, args) -> tuple[str, str, dict[str, str]]:
+    """Resolve channel, timestamp, and day/emoji map from CLI args."""
     if args.link:
         try:
             channel, timestamp = parse_slack_url(args.link)
@@ -175,7 +174,7 @@ def main():
     else:
         channel = args.channel or os.environ.get("SLACK_CHANNEL")
         if not channel:
-            log("Error: provide a link, or set --channel / SLACK_CHANNEL for auto-search")
+            log("Error: provide --link or --channel (or set SLACK_CHANNEL)")
             sys.exit(1)
         log("Searching for message since last Friday with one day/emoji pair for each weekday...")
         try:
@@ -184,11 +183,52 @@ def main():
         except SlackApiError as e:
             log(f"Error searching channel: {e}")
             sys.exit(1)
+    return channel, timestamp, day_emoji_map
 
 
+def run_update(client: WebClient, args):
+    channel, timestamp, day_emoji_map = resolve_message(client, args)
     days = select_days(day_emoji_map)
     reactions = { emoji : day in days for day, emoji in day_emoji_map.items() }
-    submit_reactions(token, channel, timestamp, reactions)
+    submit_reactions(client, channel, timestamp, reactions)
+
+
+def run_status(client: WebClient, args):
+    channel, timestamp, day_emoji_map = resolve_message(client, args)
+    show_status(client, channel, timestamp, day_emoji_map)
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Slack reaction tool")
+    source = parser.add_mutually_exclusive_group()
+    source.add_argument("--link", help="Slack message link")
+    source.add_argument("--channel", help="Channel ID for auto-search (or set SLACK_CHANNEL)")
+    subparsers = parser.add_subparsers(dest="command")
+    subparsers.add_parser("update", help="Select and submit reactions")
+    subparsers.add_parser("status", help="Show days already registered")
+
+    args = parser.parse_args()
+
+    token = os.environ.get("SLACK_USER_TOKEN")
+    if not token:
+        log("Error: SLACK_USER_TOKEN environment variable not set")
+        log("\nTo get a user token:")
+        log("1. Create a Slack app at https://api.slack.com/apps")
+        log("2. Add 'reactions:read', 'reactions:write', and 'channels:history' to User Token Scopes")
+        log("3. Install the app to your workspace")
+        log("4. Copy the User OAuth Token (starts with xoxp-)")
+        sys.exit(1)
+
+    client = WebClient(token=token)
+
+    match args.command:
+        case "update":
+            run_update(client, args)
+        case "status":
+            run_status(client, args)
+        case _:
+            parser.print_help()
+            sys.exit(1)
 
 
 if __name__ == "__main__":
