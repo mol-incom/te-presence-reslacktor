@@ -6,6 +6,7 @@ import os
 import re
 import sys
 from datetime import datetime, timedelta
+from collections.abc import Container
 from typing import NamedTuple
 
 import emoji
@@ -128,8 +129,7 @@ def show_status(client: WebClient, msg: MessageRef, day_emoji_map: dict[str, str
     """Print which days the current user has registered for via reactions."""
     user_reactions = fetch_user_reactions(client, msg)
     for day, emoji_name in day_emoji_map.items():
-        registered = emoji_name in user_reactions
-        marker = "✓" if registered else " "
+        marker = "✓" if emoji_name in user_reactions else " "
         print(f"  [{marker}] {emoji_of_name(emoji_name)}  {day.capitalize()}")
 
 
@@ -154,12 +154,13 @@ def submit_reactions(client: WebClient, msg: MessageRef, reactions: dict[str, bo
                 log(f"Failed to add/remove reaction :{reaction}: - {e.response["error"]}")
 
 
-def select_days(day_emoji_map: dict[str, str]) -> list[str]:
+def select_days(day_emoji_map: dict[str, str], currently_registered: Container[str] = ()) -> list[str]:
     """Prompt user to select days and return emoji names with checked state."""
     choices = [
-        questionary.Choice(f"{emoji_of_name(emoji)}  {day.capitalize()}", value=day)
+        questionary.Choice(f"{emoji_of_name(emoji)}  {day.capitalize()}", value=day, checked=day in currently_registered)
         for day, emoji in day_emoji_map.items()
     ]
+    # Compared to .ask(), .unsafe_ask() propagates KeyboardInterrupt instead of returning None.
     return questionary.checkbox("Select days:", choices=choices).unsafe_ask()
 
 
@@ -195,7 +196,9 @@ def resolve_message(client: WebClient, args) -> tuple[MessageRef, dict[str, str]
 
 def run_report(client: WebClient, args):
     msg, day_emoji_map = resolve_message(client, args)
-    days = select_days(day_emoji_map)
+    user_reactions = fetch_user_reactions(client, msg)
+    currently_registered = {day for day, emoji in day_emoji_map.items() if emoji in user_reactions}
+    days = select_days(day_emoji_map, currently_registered)
     reactions = { emoji : day in days for day, emoji in day_emoji_map.items() }
     submit_reactions(client, msg, reactions)
 
