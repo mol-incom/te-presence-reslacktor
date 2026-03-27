@@ -25,9 +25,23 @@ from slack_sdk.errors import SlackApiError
 weekdays_lower = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday']
 
 
+DayEmojiMap = dict[str, str]
+"""Mapping from lowercase weekday name to emoji name."""
+
+
 class MessageRef(NamedTuple):
     channel: str
     timestamp: str
+
+
+class Message(NamedTuple):
+    ref: MessageRef
+    text: str
+
+
+class ParsedMessage(NamedTuple):
+    day_emoji_map: DayEmojiMap
+    message: Message
 
 
 def log(msg: str):
@@ -83,7 +97,7 @@ def parse_line_day_emoji(line: str) -> tuple[str, str] | None:
     return day_id, emoji_match.group(1)
 
 
-def parse_emoji_from_message(text: str) -> dict[str, str]:
+def parse_emoji_from_message(text: str) -> DayEmojiMap:
     """Parse day-to-emoji mapping from message text."""
     result = {}
     for line in text.splitlines():
@@ -94,7 +108,7 @@ def parse_emoji_from_message(text: str) -> dict[str, str]:
     return result
 
 
-def find_message_in_history(client: WebClient, channel: str) -> tuple[dict[str, str], str]:
+def find_message_in_history(client: WebClient, channel: str) -> ParsedMessage:
     """Search channel history from now back to latest Friday for a message with exactly 5 day/emoji pairs."""
     now = datetime.now()
     days_since_friday = (now.weekday() - 4) % 7  # Friday is the 4th weekday
@@ -110,7 +124,7 @@ def find_message_in_history(client: WebClient, channel: str) -> tuple[dict[str, 
             text = msg.get("text", "")
             day_emoji_map = parse_emoji_from_message(text)
             if len(day_emoji_map) == len(weekdays_lower):
-                return day_emoji_map, msg["ts"]
+                return ParsedMessage(day_emoji_map, Message(MessageRef(channel, msg["ts"]), text))
         metadata = response.get("response_metadata", {})
         cursor = metadata.get("next_cursor")
         if not cursor:
@@ -146,7 +160,7 @@ def submit_reactions(client: WebClient, msg: MessageRef, reactions: dict[str, bo
                 log(f"Failed to add/remove reaction :{reaction}: - {e.response["error"]}")
 
 
-def select_days(day_emoji_map: dict[str, str], currently_registered: Container[str] = ()) -> list[str]:
+def select_days(day_emoji_map: DayEmojiMap, currently_registered: Container[str] = ()) -> list[str]:
     """Prompt user to select days and return emoji names with checked state."""
     choices = [
         questionary.Choice(f"{emoji_of_name(emoji)}  {day.capitalize()}", value=day, checked=day in currently_registered)
@@ -156,17 +170,18 @@ def select_days(day_emoji_map: dict[str, str], currently_registered: Container[s
     return questionary.checkbox("Select days:", choices=choices).unsafe_ask()
 
 
-def resolve_message(client: WebClient, args) -> tuple[MessageRef, dict[str, str]]:
+def resolve_message(client: WebClient, args) -> ParsedMessage:
     """Resolve message reference and day/emoji map from CLI args."""
     if args.link:
         try:
-            msg = parse_slack_url(args.link)
-            message_text = fetch_message(client, msg)
+            ref = parse_slack_url(args.link)
+            message_text = fetch_message(client, ref)
             day_emoji_map = parse_emoji_from_message(message_text)
             if not day_emoji_map:
                 log("Could not parse any day/emoji pairs from message")
                 log(f"Message text: {message_text}")
                 sys.exit(1)
+            return ParsedMessage(day_emoji_map, Message(ref, message_text))
         except SlackApiError as e:
             log(f"Error fetching message: {e}")
             sys.exit(1)
@@ -177,22 +192,30 @@ def resolve_message(client: WebClient, args) -> tuple[MessageRef, dict[str, str]
             sys.exit(1)
         log("Searching for message since last Friday with one day/emoji pair for each weekday...")
         try:
-            day_emoji_map, timestamp = find_message_in_history(client, channel)
-            log(f"Found message: {channel}/{timestamp}")
-            msg = MessageRef(channel, timestamp)
+            parsed_msg = find_message_in_history(client, channel)
+            ts_dt = f"{datetime.fromtimestamp(float(parsed_msg.message.ref.timestamp)):%Y-%m-%d %H:%M}"
+            log(f"Found message from {ts_dt} [{parsed_msg.message.ref.channel}/{parsed_msg.message.ref.timestamp}]: {first_line_truncated(parsed_msg)}")
+            return parsed_msg
         except SlackApiError as e:
             log(f"Error searching channel: {e}")
             sys.exit(1)
-    return msg, day_emoji_map
+
+
+def first_line_truncated(parsed_msg: ParsedMessage, max_len = 32) -> str:
+    first_line = parsed_msg.message.text.split("\n", 1)[0]
+    if len(first_line) > max_len:
+        suffix = " [...]"
+        first_line = first_line[:max_len - len(suffix)] + suffix
+    return first_line
 
 
 def run_report(client: WebClient, args):
-    msg, day_emoji_map = resolve_message(client, args)
-    user_reactions = fetch_user_reactions(client, msg)
-    currently_registered = {day for day, emoji in day_emoji_map.items() if emoji in user_reactions}
-    days = select_days(day_emoji_map, currently_registered)
-    reactions = { emoji : day in days for day, emoji in day_emoji_map.items() }
-    submit_reactions(client, msg, reactions)
+    msg = resolve_message(client, args)
+    user_reactions = fetch_user_reactions(client, msg.message.ref)
+    currently_registered = {day for day, emoji in msg.day_emoji_map.items() if emoji in user_reactions}
+    days = select_days(msg.day_emoji_map, currently_registered)
+    reactions = { emoji : day in days for day, emoji in msg.day_emoji_map.items() }
+    submit_reactions(client, msg.message.ref, reactions)
 
 
 def main():
